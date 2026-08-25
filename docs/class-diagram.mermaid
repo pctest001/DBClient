@@ -1,0 +1,167 @@
+classDiagram
+    %% ===== 数据模型 =====
+    class ConnectionRecord {
+        +string id
+        +string name
+        +DbType type
+        +string host
+        +number port
+        +string database
+        +string username
+        +string passwordEnc
+        +string createdAt
+        +string updatedAt
+    }
+    class ConnectionInput {
+        +string name
+        +DbType type
+        +string host
+        +number port
+        +string database
+        +string username
+        +string password
+    }
+    class ConnectionPublic {
+        +string id
+        +string name
+        +DbType type
+        +string host
+        +number port
+        +string database
+        +string username
+        +string createdAt
+        +string updatedAt
+    }
+    class AiSettingsRecord {
+        +string baseUrl
+        +string apiKeyEnc
+        +string model
+        +boolean enabled
+        +string updatedAt
+    }
+    class AiSettingsInput {
+        +string baseUrl
+        +string apiKey
+        +string model
+        +boolean enabled
+    }
+    class AiSettingsPublic {
+        +string baseUrl
+        +string model
+        +boolean enabled
+        +boolean hasKey
+    }
+    class QueryExecReq {
+        +string connectionId
+        +string sql
+        +boolean limit
+        +number limitValue
+        +boolean unlimited
+    }
+    class QueryResult {
+        +string[] columns
+        +Record~string,unknown~[] rows
+        +number rowCount
+        +number elapsedMs
+        +boolean truncated
+        +number appliedLimit
+    }
+    class AiGenerateReq {
+        +string connectionId
+        +string prompt
+    }
+    class AiGenerateRes {
+        +string sql
+        +string model
+    }
+    class HistoryItem {
+        +string id
+        +string connectionId
+        +string connectionName
+        +string sql
+        +string status
+        +number rowCount
+        +number elapsedMs
+        +string error
+        +string executedAt
+    }
+
+    ConnectionInput <|-- ConnectionRecord : persist(encrypt)
+    ConnectionRecord <|-- ConnectionPublic : strip password
+    AiSettingsInput <|-- AiSettingsRecord : persist(encrypt)
+    AiSettingsRecord <|-- AiSettingsPublic : strip key
+
+    %% ===== 服务层 =====
+    class CryptoService {
+        -Buffer key
+        +encrypt(plain: string): string
+        +decrypt(token: string): string
+    }
+    class DbService {
+        +testConnection(input: ConnectionInput): Promise~ConnectionTestRes~
+        +execute(conn: ConnectionRecord, sql: string, opts): Promise~QueryResult~
+    }
+    class SchemaService {
+        +getDdlContext(conn: ConnectionRecord): Promise~string~
+    }
+    class ConnectionService {
+        +list(): ConnectionPublic[]
+        +getById(id): ConnectionPublic
+        +create(input): ConnectionPublic
+        +update(id, input): ConnectionPublic
+        +remove(id): void
+        +test(input): ConnectionTestRes
+    }
+    class SettingsService {
+        +get(): AiSettingsPublic
+        +save(input): AiSettingsPublic
+        +test(input): Promise~{ok,message}~
+    }
+    class AiService {
+        +generate(conn, prompt): Promise~AiGenerateRes~
+    }
+    class HistoryService {
+        +list(connectionId?, limit?): HistoryItem[]
+        +add(item): void
+        +remove(id): void
+        +clear(): void
+    }
+
+    CryptoService <.. ConnectionService : decrypt/encrypt
+    CryptoService <.. SettingsService : decrypt/encrypt
+    ConnectionService ..> CryptoService : uses
+    SettingsService ..> CryptoService : uses
+    DbService ..> CryptoService : decrypt password
+    AiService ..> SchemaService : ddl context
+    AiService ..> CryptoService : decrypt apiKey
+    ConnectionService ..> DbService : testConnection
+    DbService ..> SchemaService : (optional) introspect
+
+    %% ===== 路由层 =====
+    class ConnectionsRoute {
+        +GET /api/connections
+        +POST /api/connections
+        +POST /api/connections/test
+    }
+    class QueryRoute {
+        +POST /api/query/execute
+    }
+    class AiRoute {
+        +POST /api/ai/generate
+    }
+    class SettingsRoute {
+        +GET/PUT /api/settings/ai
+        +POST /api/settings/ai/test
+    }
+    class HistoryRoute {
+        +GET/DELETE /api/history
+    }
+
+    ConnectionsRoute ..> ConnectionService
+    QueryRoute ..> DbService
+    QueryRoute ..> ConnectionService
+    QueryRoute ..> HistoryService
+    AiRoute ..> AiService
+    AiRoute ..> ConnectionService
+    SettingsRoute ..> SettingsService
+    HistoryRoute ..> HistoryService

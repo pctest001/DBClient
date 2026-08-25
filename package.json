@@ -1,0 +1,16 @@
+{
+  "name": "dbclient-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "对标 Chat2DB 的轻量级 Web 数据库客户端 MVP（MySQL / PostgreSQL + AI 生成 SQL）",
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "cd server && npm run dev",
+    "dev:web": "cd web && npm run dev",
+    "build": "cd server && npm run build && cd ../web && npm run build",
+    "start": "cd server && npm run start"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

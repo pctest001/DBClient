@@ -1,0 +1,77 @@
+%% ===== 时序图 1：测试连接 =====
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant F as ConnectionForm (前端)
+    participant C as ConnectionsRoute
+    participant CS as ConnectionService
+    participant DB as DbService
+    participant CR as CryptoService
+
+    U->>F: 填写连接信息，点「测试连接」
+    F->>C: POST /api/connections/test (ConnectionInput 明文)
+    C->>CS: test(input)
+    CS->>CR: encrypt(password) 仅用于本次测试(不入文件)
+    CS->>DB: testConnection(input)
+    DB->>DB: 建连 + SELECT 1 计时
+    alt 成功
+        DB-->>CS: {ok:true, latencyMs}
+    else 失败
+        DB-->>CS: {ok:false, message}
+    end
+    CS-->>C: ConnectionTestRes
+    C-->>F: {code:0, data:ConnectionTestRes}
+    F-->>U: 显示成功/失败原因
+
+%% ===== 时序图 2：执行 SQL =====
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant E as SqlEditor (前端)
+    participant Q as QueryRoute
+    participant CS as ConnectionService
+    participant CR as CryptoService
+    participant DB as DbService
+    participant H as HistoryService
+
+    U->>E: 编写/选中 SQL，点「执行」(限制开关状态)
+    E->>Q: POST /api/query/execute {connectionId, sql, unlimited}
+    Q->>CS: getById(connectionId)
+    CS->>CR: decrypt(passwordEnc)
+    CS-->>Q: ConnectionRecord(明文密码仅内存)
+    Q->>DB: execute(conn, sql, {unlimited})
+    DB->>DB: 若 unlimited!=true 且为单行SELECT且无LIMIT → 追加 LIMIT 1000
+    DB->>DB: 执行并计时
+    DB-->>Q: QueryResult{columns,rows,rowCount,elapsedMs,truncated}
+    Q->>H: add({connectionId, sql, status, ...})
+    Q-->>E: {code:0, data:QueryResult}
+    E-->>U: 结果表格 + 行数 + 耗时
+
+%% ===== 时序图 3：AI 生成 SQL（仅建议，不自动执行） =====
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant A as AiPanel (前端)
+    participant R as AiRoute
+    participant CS as ConnectionService
+    participant SC as SchemaService
+    participant AI as AiService
+    participant CR as CryptoService
+    participant LLM as OpenAI兼容接口
+
+    U->>A: 输入自然语言需求，点「发送」
+    A->>R: POST /api/ai/generate {connectionId, prompt}
+    R->>CS: getById(connectionId)
+    CS-->>R: ConnectionRecord
+    R->>SC: getDdlContext(conn)
+    SC->>SC: 读 information_schema(表名/列名/类型/注释)
+    SC-->>R: DDL 上下文文本(无数据行)
+    R->>AI: generate(conn, prompt, ddl)
+    AI->>CR: decrypt(apiKeyEnc)
+    AI->>LLM: POST {baseUrl}/chat/completions {system:SQL专家+DDL, user:需求}
+    LLM-->>AI: choices[0].message.content
+    AI->>AI: 剥离 ```sql 围栏，仅保留 SQL
+    AI-->>R: AiGenerateRes{sql, model}
+    R-->>A: {code:0, data:AiGenerateRes}
+    A-->>U: 展示生成 SQL + [回填编辑器][复制]
+    Note over U,A: 用户点击「回填编辑器」→ 仅写入 SqlEditor，**不**触发执行(P0-5)

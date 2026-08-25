@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+server/node_modules/
+web/node_modules/
+
+# Runtime data (connections / settings / history) — gitignored
+server/data/
+
+# Env
+.env
+server/.env
+web/.env
+
+# Build output
+dist/
+web/dist/
+server/dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
