@@ -1,6 +1,6 @@
 # DBClient MVP
 
-对标 [Chat2DB](https://github.com/chat2db/Chat2DB) 的轻量级 Web 数据库客户端 MVP，支持 MySQL / PostgreSQL 连接管理、SQL 编辑器执行与结果展示、AI 自然语言生成 SQL（OpenAI 兼容接口），连接密码与 API Key 本地加密存储。
+轻量级 Web 数据库客户端 MVP，支持 MySQL / PostgreSQL 连接管理、SQL 编辑器执行与结果展示、AI 自然语言生成 SQL（OpenAI 兼容接口），连接密码与 API Key 本地加密存储。
 
 ## 技术栈
 
