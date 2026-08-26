@@ -98,6 +98,19 @@ export async function testSettings(
         message: `接口返回 ${resp.status}: ${text.slice(0, 200)}`,
       };
     }
+    // 即便 HTTP 200，也要校验返回是否为合法 JSON（避免把 HTML 落地页误判为成功）
+    const text = await resp.text();
+    try {
+      JSON.parse(text);
+    } catch {
+      const looksHtml = /^\s*<(!doctype|html)/i.test(text);
+      return {
+        ok: false,
+        message: looksHtml
+          ? '返回的是网页而非 JSON（疑似 Base URL 地址错误，请确认是否包含 /v1 路径，例如 https://<域名>/v1）'
+          : '返回非 JSON 内容，请检查 Base URL 与接口地址',
+      };
+    }
     return { ok: true, message: '连通性测试成功' };
   } catch (err) {
     if ((err as Error).name === 'AbortError') {

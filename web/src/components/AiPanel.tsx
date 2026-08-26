@@ -31,7 +31,7 @@ export default function AiPanel(): JSX.Element {
   const [prompt, setPrompt] = useState('');
 
   const handleSend = () => {
-    if (!prompt.trim() || !current) return;
+    if (!prompt.trim()) return;
     void generateAi(prompt.trim());
   };
 
@@ -61,14 +61,9 @@ export default function AiPanel(): JSX.Element {
           maxRows={6}
           fullWidth
           size="small"
-          placeholder={
-            current
-              ? `描述你的需求，例如：查询最近 7 天注册的用户`
-              : '请先选择一个数据库连接'
-          }
+          placeholder="描述你的需求，例如：查询最近 7 天注册的用户（已选数据库连接时会带上表结构）"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          disabled={!current}
         />
         <Button
           className="mt-2"
@@ -76,7 +71,7 @@ export default function AiPanel(): JSX.Element {
           fullWidth
           startIcon={aiLoading ? <CircularProgress size={16} color="inherit" /> : <SendIcon />}
           onClick={handleSend}
-          disabled={aiLoading || !current || !prompt.trim()}
+          disabled={aiLoading || !prompt.trim()}
         >
           {aiLoading ? '生成中…' : '发送'}
         </Button>

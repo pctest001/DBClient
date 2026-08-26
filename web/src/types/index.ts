@@ -57,7 +57,7 @@ export interface QueryResult {
 }
 
 export interface AiGenerateReq {
-  connectionId: string;
+  connectionId?: string; // 可选：提供则带上该库表结构；不提供则纯自然语言生成
   prompt: string;
 }
 

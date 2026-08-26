@@ -13,13 +13,15 @@ import { generate } from '../services/aiService.js';
 const router = Router();
 
 const schema = z.object({
-  connectionId: z.string().min(1, 'connectionId 必填'),
+  connectionId: z.string().min(1).optional(),
   prompt: z.string().min(1, '需求描述不能为空'),
 });
 
 router.post('/generate', asyncHandler(async (req, res) => {
   const body = validate(schema, req.body);
-  const connRecord = connectionService.getRecordById(body.connectionId);
+  const connRecord = body.connectionId
+    ? connectionService.getRecordById(body.connectionId)
+    : null;
   const result = await generate(connRecord, body.prompt);
   ok(res, result);
 }));

@@ -116,21 +116,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async generateAi(prompt) {
-    const { currentConnection } = get();
-    if (!currentConnection) {
-      set({ aiError: '请先选择一个数据库连接' });
-      return;
-    }
     if (!prompt.trim()) {
       set({ aiError: '请输入需求描述' });
       return;
     }
     set({ aiLoading: true, aiError: null });
     try {
-      const res = await api.generateSql({
-        connectionId: currentConnection.id,
-        prompt,
-      });
+      const current = get().currentConnection;
+      const res = await api.generateSql(
+        current ? { connectionId: current.id, prompt } : { prompt }
+      );
       set({ aiResult: res.sql, aiLoading: false });
     } catch (err) {
       set({ aiLoading: false, aiError: (err as Error).message });

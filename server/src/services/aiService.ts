@@ -30,7 +30,7 @@ function stripFences(text: string): string {
  * @param prompt 用户自然语言需求
  */
 export async function generate(
-  conn: ConnectionRecord,
+  conn: ConnectionRecord | null,
   prompt: string
 ): Promise<AiGenerateRes> {
   const settings = getSettings();
@@ -45,7 +45,9 @@ export async function generate(
   }
 
   const apiKey = decryptApiKey();
-  const ddl = await getDdlContext(conn);
+  const ddl = conn
+    ? await getDdlContext(conn)
+    : '-- (未选择数据库连接，请基于通用 SQL 语法生成)';
   const userContent = `${ddl}\n\n需求：${prompt}`;
 
   const baseUrl = settings.baseUrl.replace(/\/$/, '');
@@ -66,7 +68,6 @@ export async function generate(
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userContent },
         ],
-        temperature: 0,
       }),
       signal: controller.signal,
     });
@@ -76,9 +77,19 @@ export async function generate(
       throw new AppError(50003, `AI 接口返回 ${resp.status}: ${text.slice(0, 200)}`);
     }
 
-    const json = (await resp.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
+    const text = await resp.text();
+    let json: { choices?: { message?: { content?: string } }[] };
+    try {
+      json = JSON.parse(text) as typeof json;
+    } catch {
+      const looksHtml = /^\s*<(!doctype|html)/i.test(text);
+      throw new AppError(
+        50003,
+        looksHtml
+          ? 'AI 接口返回的是网页而非 JSON（疑似 Base URL 地址错误，请确认是否包含 /v1 路径，例如 https://<域名>/v1）'
+          : `AI 接口返回非 JSON 内容（HTTP ${resp.status}），请检查 Base URL 与接口地址`
+      );
+    }
     raw = json.choices?.[0]?.message?.content ?? '';
   } catch (err) {
     if ((err as Error).name === 'AbortError') {
