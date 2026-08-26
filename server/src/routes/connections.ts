@@ -6,6 +6,8 @@
  * PUT /api/connections/:id
  * DELETE /api/connections/:id
  * POST /api/connections/test
+ * GET /api/connections/export        (P2-5 导出)
+ * POST /api/connections/import        (P2-5 导入)
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -13,9 +15,42 @@ import { connectionService } from '../services/connectionService.js';
 import { decrypt } from '../services/cryptoService.js';
 import { getTableList } from '../services/schemaService.js';
 import { validate, ok, asyncHandler } from '../utils/response.js';
-import type { ConnectionInput } from '../models/types.js';
+import type { ConnectionInput, ConnectionImportReq } from '../models/types.js';
 
 const router = Router();
+
+/**
+ * 导出全部连接（P2-5）。默认返回密文 passwordEnc；?plain=1 返回明文 password。
+ * 必须在 /:id 之前注册，避免被参数路由捕获。
+ */
+router.get('/export', (req, res) => {
+  const plain = req.query.plain === '1' || req.query.plain === 'true';
+  ok(res, connectionService.exportAll(plain));
+});
+
+/** 导入连接（P2-5）批量导入，单条失败不中断其余；冲突策略 skip/overwrite/rename。 */
+const importSchema = z.object({
+  connections: z
+    .array(
+      z.object({
+        name: z.string().min(1, '名称必填'),
+        type: z.enum(['mysql', 'postgres']),
+        host: z.string().min(1, '主机必填'),
+        port: z.number().int().positive('端口必须为正整数'),
+        database: z.string().min(1, '数据库名必填'),
+        username: z.string().min(1, '用户名必填'),
+        passwordEnc: z.string().optional(),
+        password: z.string().optional(),
+      })
+    )
+    .min(1, 'connections 不能为空'),
+  onConflict: z.enum(['skip', 'overwrite', 'rename']).optional(),
+});
+
+router.post('/import', asyncHandler(async (req, res) => {
+  const parsed = validate(importSchema, req.body) as ConnectionImportReq;
+  ok(res, connectionService.importMany(parsed.connections, parsed.onConflict ?? 'skip'));
+}));
 
 const inputSchema = z.object({
   name: z.string().min(1, '名称必填'),

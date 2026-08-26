@@ -28,6 +28,47 @@ export interface ConnectionTestRes {
   latencyMs: number | null;
 }
 
+/** 导出单条：默认含密文 passwordEnc；plain 模式含明文 password 且不含 passwordEnc。 */
+export type ConnectionExportItem = Omit<ConnectionInput, 'password'> & {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  passwordEnc?: string;
+  password?: string;
+};
+export interface ConnectionExport {
+  version: number;
+  exportedAt: string;
+  connections: ConnectionExportItem[];
+}
+/** 导入单条：二选一提供 passwordEnc（密文）或 password（明文）。 */
+export interface ConnectionImportItem {
+  name: string;
+  type: DbType;
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  passwordEnc?: string;
+  password?: string;
+}
+export type ImportConflictStrategy = 'skip' | 'overwrite' | 'rename';
+export interface ConnectionImportReq {
+  connections: ConnectionImportItem[];
+  onConflict?: ImportConflictStrategy;
+}
+export interface ConnectionImportError {
+  name: string;
+  error: string;
+}
+export interface ConnectionImportResult {
+  imported: number;
+  skipped: number;
+  overwritten: number;
+  renamed: number;
+  errors: ConnectionImportError[];
+}
+
 /** 表内单列的元信息（与后端 schemaService 对齐）。 */
 export interface ColumnInfo {
   name: string;

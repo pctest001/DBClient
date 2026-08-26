@@ -63,12 +63,12 @@ dbclient-mvp/
 │   │   │   ├── cryptoService.ts     # AES-256-GCM 加解密（见 §3.5）
 │   │   │   ├── dbService.ts         # 建连 + 执行 SQL（mysql2 / pg）
 │   │   │   ├── schemaService.ts     # information_schema 读取 DDL 上下文
-│   │   │   ├── connectionService.ts # connections.json 增删改查
+│   │   │   ├── connectionService.ts # connections.json 增删改查 + 导入/导出（P2-5）
 │   │   │   ├── settingsService.ts   # settings.json 增改（AI 配置）
 │   │   │   ├── aiService.ts         # 调用 OpenAI 兼容接口生成 SQL
 │   │   │   └── historyService.ts    # history.json 执行历史（P1）
 │   │   └── routes/
-│   │       ├── connections.ts   # P0-1 连接 CRUD + 测试
+│   │       ├── connections.ts   # P0-1 连接 CRUD + 测试；P2-5 导入/导出
 │   │       ├── query.ts          # P0-2 SQL 执行
 │   │       ├── ai.ts             # P0-3 AI 生成 SQL
 │   │       ├── settings.ts       # P1-3 AI 接口配置 + 测试
@@ -202,6 +202,54 @@ export interface ConnectionTestRes {
   latencyMs: number | null;
 }
 
+// ===== P2-5 连接配置导入 / 导出 =====
+// 导出单条：默认含密文 passwordEnc；?plain=1 时含明文 password 且不含 passwordEnc
+export interface ConnectionExportItem {
+  id: string;
+  name: string;
+  type: DbType;
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  createdAt: string;
+  updatedAt: string;
+  passwordEnc?: string;   // 密文（默认导出）
+  password?: string;      // 仅 plain 模式出现
+}
+export interface ConnectionExport {
+  version: number;        // 当前 1
+  exportedAt: string;
+  connections: ConnectionExportItem[];
+}
+// 导入单条：passwordEnc（密文）与 password（明文）二选一
+export interface ConnectionImportItem {
+  name: string;
+  type: DbType;
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  passwordEnc?: string;
+  password?: string;
+}
+export type ImportConflictStrategy = 'skip' | 'overwrite' | 'rename';
+export interface ConnectionImportReq {
+  connections: ConnectionImportItem[];
+  onConflict?: ImportConflictStrategy;  // 默认 'skip'
+}
+export interface ConnectionImportError {
+  name: string;
+  error: string;          // 校验失败 / 密文不可解等单条错误
+}
+export interface ConnectionImportResult {
+  imported: number;
+  skipped: number;        // onConflict=skip 命中同名
+  overwritten: number;    // onConflict=overwrite 命中同名
+  renamed: number;        // onConflict=rename 自动加 " (n)" 后缀
+  errors: ConnectionImportError[];
+}
+
 export interface AiSettingsInput {
   baseUrl: string;           // 如 https://api.openai.com/v1
   apiKey: string;            // 明文，落盘加密
@@ -308,6 +356,8 @@ decrypt(token: string): string   // 还原明文；失败抛 EncryptionError
 | 方法 | 路径 | 请求体 | 响应 `data` |
 | --- | --- | --- | --- |
 | GET | `/api/connections` | — | `ConnectionPublic[]` |
+| GET | `/api/connections/export` | — | `ConnectionExport` |
+| POST | `/api/connections/import` | `ConnectionImportReq` | `ConnectionImportResult` |
 | GET | `/api/connections/:id` | — | `ConnectionPublic` |
 | POST | `/api/connections` | `ConnectionInput` | `ConnectionPublic` |
 | PUT | `/api/connections/:id` | `ConnectionInput` | `ConnectionPublic` |
@@ -315,6 +365,8 @@ decrypt(token: string): string   // 还原明文；失败抛 EncryptionError
 | POST | `/api/connections/test` | `ConnectionInput` | `ConnectionTestRes` |
 
 - 创建/编辑时 `password` 明文入参 → 服务层 `encrypt` 后存 `passwordEnc`；响应不回传密码字段。
+- **导出**（P2-5）：`GET /api/connections/export` 默认含密文 `passwordEnc`，`?plain=1` 返回明文 `password`（前端明文导出勾选项带风险提示）。**注册顺序注意**：`/export`、`/import` 必须在 `/:id` 参数路由之前注册，否则被其捕获。
+- **导入**（P2-5）：同名冲突按 `onConflict` 处理——`skip`（默认，跳过）/ `overwrite`（覆盖，保留原 id 与 createdAt）/ `rename`（自动追加 ` (n)` 后缀）；密文导入要求当前主密钥可解密，单条失败计入 `errors` 不中断整批。
 
 #### 查询执行（P0-2）
 

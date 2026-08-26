@@ -7,7 +7,7 @@
  */
 import { nanoid } from 'nanoid';
 import { readJson, writeJson } from '../utils/store.js';
-import { encrypt } from './cryptoService.js';
+import { encrypt, decrypt } from './cryptoService.js';
 import { testConnection } from './dbService.js';
 import { AppError } from '../utils/response.js';
 import type {
@@ -15,6 +15,11 @@ import type {
   ConnectionRecord,
   ConnectionPublic,
   ConnectionTestRes,
+  ConnectionExport,
+  ConnectionExportItem,
+  ConnectionImportItem,
+  ConnectionImportResult,
+  ImportConflictStrategy,
 } from '../models/types.js';
 
 const FILE = 'connections.json';
@@ -120,5 +125,130 @@ export const connectionService = {
   /** 测试连接（失败抛 50001）。 */
   test(input: ConnectionInput): Promise<ConnectionTestRes> {
     return testConnection(input);
+  },
+
+  /**
+   * 导出全部连接。plain=false（默认）每条含密文 passwordEnc；plain=true 含明文 password。
+   * 属于用户主动触发的下载动作，可直接返回密码字段；其余常规接口仍不泄密。
+   */
+  exportAll(plain: boolean): ConnectionExport {
+    const list = loadAll();
+    const connections: ConnectionExportItem[] = list.map((rec) => {
+      if (plain) {
+        const { passwordEnc, ...rest } = rec;
+        void passwordEnc;
+        return { ...rest, password: decrypt(rec.passwordEnc) } as ConnectionExportItem;
+      }
+      return { ...rec } as ConnectionExportItem;
+    });
+    return { version: 1, exportedAt: new Date().toISOString(), connections };
+  },
+
+  /**
+   * 批量导入连接。逐条处理，单条失败计入 errors 不中断其余。
+   * - 提供 passwordEnc：用当前密钥 decrypt 校验，成功则原样入库，失败记错误（跨密钥）。
+   * - 提供 password：encrypt 后入库。
+   * - onConflict：skip（默认跳过同名）/ overwrite（覆盖）/ rename（自动加后缀）。
+   */
+  importMany(
+    items: ConnectionImportItem[],
+    onConflict: ImportConflictStrategy = 'skip'
+  ): ConnectionImportResult {
+    const list = loadAll();
+    const result: ConnectionImportResult = {
+      imported: 0,
+      skipped: 0,
+      overwritten: 0,
+      renamed: 0,
+      errors: [],
+    };
+
+    const build = (
+      item: ConnectionImportItem,
+      passwordEnc: string,
+      id?: string,
+      createdAt?: string
+    ): ConnectionRecord => {
+      const now = new Date().toISOString();
+      return {
+        id: id ?? nanoid(),
+        name: item.name,
+        type: item.type,
+        host: item.host,
+        port: item.port,
+        database: item.database,
+        username: item.username,
+        passwordEnc,
+        createdAt: createdAt ?? now,
+        updatedAt: now,
+      };
+    };
+
+    for (const item of items) {
+      // 基础字段校验
+      if (
+        !item.name ||
+        (item.type !== 'mysql' && item.type !== 'postgres') ||
+        !item.host ||
+        !item.database ||
+        !item.username ||
+        typeof item.port !== 'number' ||
+        item.port <= 0
+      ) {
+        result.errors.push({ name: item.name ?? '(无名)', error: '字段缺失或非法' });
+        continue;
+      }
+
+      // 解析密码字段
+      let passwordEnc: string;
+      if (item.passwordEnc) {
+        try {
+          decrypt(item.passwordEnc); // 校验当前密钥可解
+          passwordEnc = item.passwordEnc;
+        } catch {
+          result.errors.push({ name: item.name, error: '密文与当前密钥不匹配，无法导入' });
+          continue;
+        }
+      } else if (item.password) {
+        passwordEnc = encrypt(item.password);
+      } else {
+        result.errors.push({ name: item.name, error: '缺少密码（password 或 passwordEnc）' });
+        continue;
+      }
+
+      const existingIdx = list.findIndex((c) => c.name === item.name);
+      if (existingIdx >= 0) {
+        if (onConflict === 'skip') {
+          result.skipped++;
+          continue;
+        }
+        if (onConflict === 'overwrite') {
+          list[existingIdx] = build(
+            item,
+            passwordEnc,
+            list[existingIdx].id,
+            list[existingIdx].createdAt
+          );
+          result.overwritten++;
+          continue;
+        }
+        // rename：自动加后缀避免重名
+        let newName = item.name;
+        let n = 2;
+        while (list.some((c) => c.name === newName)) {
+          newName = `${item.name} (${n})`;
+          n++;
+        }
+        list.push(build({ ...item, name: newName }, passwordEnc));
+        result.renamed++;
+        continue;
+      }
+
+      list.push(build(item, passwordEnc));
+      result.imported++;
+    }
+
+    saveAll(list);
+    return result;
   },
 };

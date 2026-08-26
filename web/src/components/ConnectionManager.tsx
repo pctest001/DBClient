@@ -15,6 +15,7 @@ import {
   Tooltip,
   Snackbar,
   Alert,
+  FormControlLabel,
 } from '@mui/material';
 import StorageIcon from '@mui/icons-material/Storage';
 import AddIcon from '@mui/icons-material/Add';
@@ -22,10 +23,13 @@ import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import FileUploadIcon from '@mui/icons-material/FileUpload';
 import { useAppStore } from '../store/appStore';
 import { api } from '../api/client';
 import type { ConnectionPublic } from '../types';
 import ConnectionForm from './ConnectionForm';
+import ImportDialog from './ImportDialog';
 import SchemaTree from './SchemaTree';
 
 /**
@@ -43,6 +47,9 @@ export default function ConnectionManager(): JSX.Element {
   const [editing, setEditing] = useState<ConnectionPublic | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [snack, setSnack] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [plainExport, setPlainExport] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const filtered = connections.filter((c) =>
     c.name.toLowerCase().includes(filter.trim().toLowerCase())
@@ -89,6 +96,29 @@ export default function ConnectionManager(): JSX.Element {
     }
   };
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const data = await api.exportConnections(plainExport);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const date = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `dbclient-connections-${date}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setSnack({
+        ok: true,
+        msg: plainExport ? '已导出（含明文密码，请注意文件安全）' : '已导出（密文）',
+      });
+    } catch (err) {
+      setSnack({ ok: false, msg: (err as Error).message });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <Box className="flex flex-col h-full">
       <Box className="p-3 border-b border-gray-200">
@@ -96,10 +126,39 @@ export default function ConnectionManager(): JSX.Element {
           <Typography variant="subtitle2" className="font-semibold text-gray-700">
             数据库连接
           </Typography>
-          <Button size="small" startIcon={<AddIcon />} onClick={openNew} variant="outlined">
-            新建
-          </Button>
+          <Box className="flex items-center gap-1">
+            <Tooltip title="导出全部连接为 JSON（默认密文）">
+              <IconButton size="small" onClick={handleExport} disabled={exporting}>
+                {exporting ? <CircularProgress size={16} /> : <FileDownloadIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="从 JSON 文件批量导入连接">
+              <IconButton size="small" onClick={() => setImportOpen(true)}>
+                <FileUploadIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Button size="small" startIcon={<AddIcon />} onClick={openNew} variant="outlined">
+              新建
+            </Button>
+          </Box>
         </Box>
+        <FormControlLabel
+          className="mb-1 -mt-1"
+          control={
+            <input
+              type="checkbox"
+              checked={plainExport}
+              onChange={(e) => setPlainExport(e.target.checked)}
+            />
+          }
+          label={
+            <Tooltip title="导出明文密码风险高：文件泄露将直接暴露数据库凭据">
+              <Typography variant="caption" className="text-gray-500">
+                导出含明文密码
+              </Typography>
+            </Tooltip>
+          }
+        />
         <TextField
           size="small"
           placeholder="筛选连接名"
@@ -194,6 +253,14 @@ export default function ConnectionManager(): JSX.Element {
         onClose={() => setFormOpen(false)}
         onSaved={async () => {
           setFormOpen(false);
+          await loadConnections();
+        }}
+      />
+
+      <ImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={async () => {
           await loadConnections();
         }}
       />

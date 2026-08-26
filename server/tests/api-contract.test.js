@@ -8,14 +8,18 @@
  *  - GET  /api/settings/ai        → { code:0, data 含 baseUrl/model/enabled/hasKey }
  *  - POST /api/ai/generate        缺参数 → { code:40001 }（校验早于 LLM 调用）
  *
- * 测试前清空 server/data 以保证连接列表为空；使用独立端口避免冲突。
- * 测试结束后关闭子进程。
+ * 数据隔离：后端 getDataDir() = process.cwd()/data，故将子进程 cwd 指向
+ * 系统临时目录（mkdtemp 独立创建），天然为空且与真实 server/data 完全
+ * 隔离（真实数据可能正被用户使用，绝不可读写）。使用独立端口避免冲突。
+ * 测试结束后关闭子进程并清理临时目录。
  */
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serverRoot = path.resolve(__dirname, '..');
@@ -39,16 +43,15 @@ async function waitForServer(base, timeoutMs = 15000) {
 }
 
 test('API 契约冒烟测试', async (t) => {
-  // 说明：本冒烟测试不写入任何数据文件。环境约束下无法覆盖既有
-  // server/data/connections.json（写入报 EPERM），而该文件当前内容即为 []，
-  // 且本次测试仅触发只读/校验接口（不会落盘），故直接复用既有空状态即可，
-  // 无需预置或清理数据目录。
+  // 独立临时 cwd：后端 data 目录解析为 <tmp>/data，初始为空且与真实
+  // server/data 完全隔离（真实数据可能正被用户使用，本测试绝不读写）。
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dbclient-api-contract-'));
 
   const child = spawn(
     NODE,
-    ['dist/index.js'],
+    [path.join(serverRoot, 'dist', 'index.js')],
     {
-      cwd: serverRoot,
+      cwd: tmpRoot,
       env: {
         ...process.env,
         DB_CLIENT_MASTER_KEY: MASTER_KEY,
@@ -113,6 +116,12 @@ test('API 契约冒烟测试', async (t) => {
           res();
         });
       });
+    }
+    // 清理测试自身的临时数据目录（系统 tmp 下，非用户数据）
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      // 清理失败不影响测试结论，残留于系统临时目录
     }
   }
 });

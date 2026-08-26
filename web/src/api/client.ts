@@ -7,6 +7,9 @@ import type {
   ConnectionPublic,
   ConnectionInput,
   ConnectionTestRes,
+  ConnectionExport,
+  ConnectionImportReq,
+  ConnectionImportResult,
   QueryExecReq,
   QueryResult,
   AiGenerateReq,
@@ -123,6 +126,12 @@ export const api = {
     request<ConnectionTestRes>('/connections/test', jsonBody(input)),
   testSavedConnection: (id: string) =>
     request<ConnectionTestRes>(`/connections/${id}/test`, { method: 'POST' }),
+
+  // ===== 连接导入/导出（P2-5） =====
+  exportConnections: (plain: boolean) =>
+    request<ConnectionExport>(`/connections/export?plain=${plain ? 1 : 0}`),
+  importConnections: (req: ConnectionImportReq) =>
+    request<ConnectionImportResult>('/connections/import', jsonBody(req)),
 
   // ===== 表结构清单（前端左侧表树） =====
   getTables: (connectionId: string) =>
