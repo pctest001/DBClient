@@ -19,17 +19,85 @@ import type {
 
 const BASE = '/api';
 
-/** 执行请求并解析统一响应；非 0 时抛出 message。 */
+/**
+ * 执行请求并解析统一响应；对「后端不可达 / 返回非 JSON」等异常给出友好中文错误。
+ *
+ * 错误优先级：
+ *  1. 网络层失败（后端没启动 / 代理不可达 / fetch 抛 TypeError）
+ *  2. HTTP 非 2xx（代理 502/504、Express 返回错误状态码）
+ *  3. 响应体为空
+ *  4. 响应体非 JSON（通常是代理 HTML 错误页）
+ *  5. JSON 解析成功但 code !== 0（保持原 message）
+ *  6. 正常返回 data
+ */
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
-  const json = (await res.json()) as ApiResponse<T>;
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+  } catch (err) {
+    // 1. 网络层失败：后端没启动 / 代理不可达 / fetch 抛 TypeError
+    const raw = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `无法连接后端服务，请确认后端已启动（默认端口 4000）。${
+        raw ? `（${raw}）` : ''
+      }`
+    );
+  }
+
+  // 2. HTTP 非 2xx：优先使用响应体中的 message
+  if (!res.ok) {
+    const bodyText = await readText(res);
+    let messageFromBody = '';
+    try {
+      const parsed = JSON.parse(bodyText) as Partial<ApiResponse<T>> | null;
+      messageFromBody = parsed?.message ?? '';
+    } catch {
+      // 响应体非 JSON，忽略，走下方的 HTTP 状态提示
+    }
+    if (messageFromBody) {
+      throw new Error(messageFromBody);
+    }
+    throw new Error(`请求失败（HTTP ${res.status} ${res.statusText}）`);
+  }
+
+  const text = await readText(res);
+
+  // 3. 响应体为空
+  if (text.trim() === '') {
+    throw new Error(
+      `后端返回为空（HTTP ${res.status} ${res.statusText}），请检查后端服务是否正常。`
+    );
+  }
+
+  // 4. 响应体非 JSON（通常是代理返回的 HTML 错误页）
+  let json: ApiResponse<T> | null = null;
+  try {
+    json = JSON.parse(text) as ApiResponse<T>;
+  } catch {
+    throw new Error(
+      `后端返回了非预期内容（非 JSON，HTTP ${res.status} ${res.statusText}），请检查后端服务与代理配置是否正常。`
+    );
+  }
+
+  // 5. JSON 解析成功但 code !== 0：保持现状
   if (json.code !== 0) {
     throw new Error(json.message || '请求失败');
   }
+
+  // 6. 正常返回
   return json.data as T;
+}
+
+/** 安全读取响应文本，读取失败时返回空字符串（避免二次异常掩盖真实错误）。 */
+async function readText(res: Response): Promise<string> {
+  try {
+    return await res.text();
+  } catch {
+    return '';
+  }
 }
 
 function jsonBody(body: unknown): RequestInit {
