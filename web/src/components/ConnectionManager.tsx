@@ -26,6 +26,7 @@ import { useAppStore } from '../store/appStore';
 import { api } from '../api/client';
 import type { ConnectionPublic } from '../types';
 import ConnectionForm from './ConnectionForm';
+import SchemaTree from './SchemaTree';
 
 /**
  * 左侧连接管理面板（P0-1）：列表 + 新建/编辑/删除/测试/打开。
@@ -58,6 +59,9 @@ export default function ConnectionManager(): JSX.Element {
 
   const handleOpen = (c: ConnectionPublic) => {
     setCurrent(c);
+    // store.setCurrentConnection 已会自动 loadTables；此处显式再触发一次，
+    // 确保「打开连接」与「store 自动加载」行为一致。
+    void useAppStore.getState().loadTables(c.id);
     void loadHistory();
   };
 
@@ -105,79 +109,83 @@ export default function ConnectionManager(): JSX.Element {
         />
       </Box>
 
-      <Box className="flex-1 overflow-auto">
-        {filtered.length === 0 ? (
-          <Typography className="p-4 text-gray-400 text-sm">暂无连接，点击「新建」添加。</Typography>
-        ) : (
-          <List dense>
-            {filtered.map((c) => {
-              const active = current?.id === c.id;
-              return (
-                <ListItemButton
-                  key={c.id}
-                  selected={active}
-                  onClick={() => handleOpen(c)}
-                  className="flex-col items-stretch"
-                >
-                  <Box className="flex items-center w-full">
-                    <ListItemIcon className="min-w-0 mr-1">
-                      <StorageIcon fontSize="small" color={active ? 'primary' : 'disabled'} />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={c.name}
-                      secondary={`${c.host}:${c.port} / ${c.database}`}
-                      primaryTypographyProps={{ className: 'truncate', noWrap: true }}
-                      secondaryTypographyProps={{ className: 'truncate', noWrap: true }}
-                    />
-                    {active && <CheckCircleIcon fontSize="small" className="text-green-500 ml-1" />}
-                  </Box>
-                  <Box className="flex items-center mt-1 gap-1">
-                    <Chip
-                      label={c.type === 'mysql' ? 'MySQL' : 'PostgreSQL'}
-                      size="small"
-                      variant="outlined"
-                      className="mr-1"
-                    />
-                    <Box className="flex-1" />
-                    <Tooltip title="测试连接">
-                      <IconButton
+      <Box className="flex-1 min-h-0 flex flex-col">
+        <Box className="overflow-auto max-h-[45%]">
+          {filtered.length === 0 ? (
+            <Typography className="p-4 text-gray-400 text-sm">暂无连接，点击「新建」添加。</Typography>
+          ) : (
+            <List dense>
+              {filtered.map((c) => {
+                const active = current?.id === c.id;
+                return (
+                  <ListItemButton
+                    key={c.id}
+                    selected={active}
+                    onClick={() => handleOpen(c)}
+                    className="flex-col items-stretch"
+                  >
+                    <Box className="flex items-center w-full">
+                      <ListItemIcon className="min-w-0 mr-1">
+                        <StorageIcon fontSize="small" color={active ? 'primary' : 'disabled'} />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={c.name}
+                        secondary={`${c.host}:${c.port} / ${c.database}`}
+                        primaryTypographyProps={{ className: 'truncate', noWrap: true }}
+                        secondaryTypographyProps={{ className: 'truncate', noWrap: true }}
+                      />
+                      {active && <CheckCircleIcon fontSize="small" className="text-green-500 ml-1" />}
+                    </Box>
+                    <Box className="flex items-center mt-1 gap-1">
+                      <Chip
+                        label={c.type === 'mysql' ? 'MySQL' : 'PostgreSQL'}
                         size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleTest(c);
-                        }}
-                      >
-                        {busyId === c.id ? <CircularProgress size={16} /> : <PlayCircleIcon fontSize="small" />}
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="编辑">
-                      <IconButton
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEdit(c);
-                        }}
-                      >
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="删除">
-                      <IconButton
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleDelete(c);
-                        }}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  </Box>
-                </ListItemButton>
-              );
-            })}
-          </List>
-        )}
+                        variant="outlined"
+                        className="mr-1"
+                      />
+                      <Box className="flex-1" />
+                      <Tooltip title="测试连接">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleTest(c);
+                          }}
+                        >
+                          {busyId === c.id ? <CircularProgress size={16} /> : <PlayCircleIcon fontSize="small" />}
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="编辑">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEdit(c);
+                          }}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="删除">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDelete(c);
+                          }}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  </ListItemButton>
+                );
+              })}
+            </List>
+          )}
+        </Box>
+
+        {current && <SchemaTree connection={current} />}
       </Box>
 
       <ConnectionForm

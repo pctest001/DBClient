@@ -11,6 +11,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { connectionService } from '../services/connectionService.js';
 import { decrypt } from '../services/cryptoService.js';
+import { getTableList } from '../services/schemaService.js';
 import { validate, ok, asyncHandler } from '../utils/response.js';
 import type { ConnectionInput } from '../models/types.js';
 
@@ -74,6 +75,16 @@ router.post('/:id/test', asyncHandler(async (req, res) => {
   };
   const result = await connectionService.test(input);
   ok(res, result);
+}));
+
+/**
+ * 获取指定连接的结构化表清单（供前端左侧表树展示）。
+ * 连接不存在时 connectionService.getRecordById 抛 40401；建连失败抛 50001。
+ */
+router.get('/:id/tables', asyncHandler(async (req, res) => {
+  const rec = connectionService.getRecordById(req.params.id);
+  const tables = await getTableList(rec);
+  ok(res, tables);
 }));
 
 export default router;

@@ -40,6 +40,21 @@ export interface ConnectionTestRes {
   latencyMs: number | null;
 }
 
+/** 表内单列的元信息（与前端 SchemaTree 对齐）。 */
+export interface ColumnInfo {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  comment: string;
+}
+
+/** 单张表的结构化元信息（含列清单），用于前端表清单展示。 */
+export interface TableInfo {
+  name: string;
+  comment: string;
+  columns: ColumnInfo[];
+}
+
 export interface AiSettingsInput {
   baseUrl: string; // 如 https://api.openai.com/v1
   apiKey: string; // 明文，落盘加密

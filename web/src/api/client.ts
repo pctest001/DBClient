@@ -14,6 +14,7 @@ import type {
   AiSettingsInput,
   AiSettingsPublic,
   HistoryItem,
+  TableInfo,
 } from '../types';
 
 const BASE = '/api';
@@ -52,6 +53,10 @@ export const api = {
     request<ConnectionTestRes>('/connections/test', jsonBody(input)),
   testSavedConnection: (id: string) =>
     request<ConnectionTestRes>(`/connections/${id}/test`, { method: 'POST' }),
+
+  // ===== 表结构清单（前端左侧表树） =====
+  getTables: (connectionId: string) =>
+    request<TableInfo[]>(`/connections/${connectionId}/tables`),
 
   // ===== 查询执行（P0-2 / P1-5） =====
   executeQuery: (req: QueryExecReq) =>

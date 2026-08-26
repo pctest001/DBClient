@@ -10,6 +10,7 @@ import type {
   HistoryItem,
   AiSettingsInput,
   AiSettingsPublic,
+  TableInfo,
 } from '../types';
 
 interface RunQueryOptions {
@@ -22,6 +23,10 @@ interface AppState {
   // 连接
   connections: ConnectionPublic[];
   currentConnection: ConnectionPublic | null;
+  // 表结构清单（前端左侧表树）
+  tables: TableInfo[];
+  tablesLoading: boolean;
+  tablesError: string | null;
   // SQL 编辑器
   sql: string;
   // 查询结果
@@ -40,6 +45,7 @@ interface AppState {
   // 动作
   loadConnections: () => Promise<void>;
   setCurrentConnection: (c: ConnectionPublic | null) => void;
+  loadTables: (connectionId: string) => Promise<void>;
   setSql: (sql: string) => void;
   runQuery: (opts?: RunQueryOptions) => Promise<void>;
   generateAi: (prompt: string) => Promise<void>;
@@ -57,6 +63,9 @@ interface AppState {
 export const useAppStore = create<AppState>((set, get) => ({
   connections: [],
   currentConnection: null,
+  tables: [],
+  tablesLoading: false,
+  tablesError: null,
   sql: '',
   queryResult: null,
   queryLoading: false,
@@ -82,7 +91,28 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setCurrentConnection(c) {
-    set({ currentConnection: c });
+    if (c) {
+      set({ currentConnection: c });
+      // 选中连接后自动拉取表清单
+      void get().loadTables(c.id);
+    } else {
+      set({ currentConnection: null, tables: [], tablesLoading: false, tablesError: null });
+    }
+  },
+
+  async loadTables(connectionId) {
+    set({ tablesLoading: true, tablesError: null });
+    try {
+      const tables = await api.getTables(connectionId);
+      // 防止结果回写时已切换到其它连接
+      if (get().currentConnection?.id === connectionId) {
+        set({ tables, tablesLoading: false });
+      }
+    } catch (err) {
+      if (get().currentConnection?.id === connectionId) {
+        set({ tables: [], tablesLoading: false, tablesError: (err as Error).message });
+      }
+    }
   },
 
   setSql(sql) {

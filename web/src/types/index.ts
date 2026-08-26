@@ -28,6 +28,21 @@ export interface ConnectionTestRes {
   latencyMs: number | null;
 }
 
+/** 表内单列的元信息（与后端 schemaService 对齐）。 */
+export interface ColumnInfo {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  comment: string;
+}
+
+/** 单张表的结构化元信息（含列清单）。 */
+export interface TableInfo {
+  name: string;
+  comment: string;
+  columns: ColumnInfo[];
+}
+
 export interface AiSettingsInput {
   baseUrl: string;
   apiKey: string;
