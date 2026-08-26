@@ -237,8 +237,26 @@ export interface AiGenerateReq {
   prompt: string;
 }
 export interface AiGenerateRes {
-  sql: string;              // 仅 SQL，已去除 markdown 围栏
+  statements: string[];     // 清洗拆分后的多条 SQL（已去围栏/解释，空段已剔除）
   model: string;
+}
+// 多语句执行（POST /api/query/execute-multi）
+export interface MultiExecReq {
+  connectionId: string;
+  sql: string;              // 可能含多条语句，服务端按 ; 拆分
+  limit?: boolean;          // 默认 true（每条 SELECT 各自追加 LIMIT 1000）
+  limitValue?: number;
+  unlimited?: boolean;
+}
+export interface MultiExecStatement {
+  sql: string;
+  result?: QueryResult;     // 成功：单条结果
+  error?: string;           // 失败：业务错误信息（无凭据/密文）
+}
+export interface MultiExecResult {
+  statements: MultiExecStatement[];
+  successCount: number;
+  errorCount: number;
 }
 export interface HistoryItem {
   id: string;
@@ -311,6 +329,7 @@ decrypt(token: string): string   // 还原明文；失败抛 EncryptionError
 | 方法 | 路径 | 请求体 | 响应 `data` |
 | --- | --- | --- | --- |
 | POST | `/api/ai/generate` | `AiGenerateReq` | `AiGenerateRes` |
+| POST | `/api/query/execute-multi` | `MultiExecReq` | `MultiExecResult` |
 
 - 后端逻辑：取连接 → `schemaService` 拉 DDL（仅结构）→ `aiService` 组装 prompt（系统提示 + DDL 上下文 + 用户需求）→ 调 OpenAI 兼容 `/chat/completions` → 解析去除 ```sql 围栏 → 返回 `sql`。**仅返回，绝不自动执行**（满足 P0-5）。
 
@@ -461,7 +480,7 @@ graph TD
 2. **AI 生成 SQL 的语句类型范围**：MVP 允许 AI 生成 SELECT 之外的语句（如带条件的 UPDATE 片段），但**一律仅建议、不自动执行**（P0-5）。是否在 UI 上对写操作额外二次确认弹窗，建议 T04 实现时加轻量确认，非阻塞。
 3. **history.json 容量**：建议上限 200 条环形覆盖，未强制；T05 实现时可由 `historyService` 维护。
 4. **前端部署形态**：生产环境是否由 Express 静态托管 `web/dist` 同源部署（单一端口）待定；MVP dev 用 Vite proxy 已满足，同源部署在 `app.ts` 预留静态目录挂载点即可。
-5. **多语句执行**：MVP 仅执行单条（整段或选中），多语句分标签展示为 P2-1，不在本次范围。
+5. **多语句执行**：已支持（新增 `POST /api/query/execute-multi`，服务端 `splitStatements` 按 `;` 拆多条、逐条独立执行、错误隔离、每条 SELECT 各自追加 LIMIT；前端 AI 面板逐条展示并支持单条/全部执行）。多语句分标签展示（P2-1）仍可选。
 
 ---
 

@@ -11,12 +11,21 @@ import type {
   AiSettingsInput,
   AiSettingsPublic,
   TableInfo,
+  MultiExecResult,
 } from '../types';
 
 interface RunQueryOptions {
   unlimited?: boolean;
   limit?: boolean;
   limitValue?: number;
+}
+
+/** 写操作二次确认状态（mode 区分「全部执行」与「单条执行」）。 */
+interface WriteConfirmState {
+  mode: 'multi' | 'single';
+  writeCount: number;
+  connectionName: string;
+  stmt?: string; // 单条执行时的语句
 }
 
 interface AppState {
@@ -29,14 +38,21 @@ interface AppState {
   tablesError: string | null;
   // SQL 编辑器
   sql: string;
-  // 查询结果
+  // 查询结果（单条执行 / 单条 SQL 结果）
   queryResult: QueryResult | null;
   queryLoading: boolean;
   queryError: string | null;
-  // AI
-  aiResult: string | null;
+  // AI（增量迭代：aiResult → aiStatements）
+  aiStatements: string[]; // AI 生成的多条语句
+  aiHint: string | null; // 纯解释无 SQL 时的友好提示
   aiLoading: boolean;
   aiError: string | null;
+  // 多语句执行结果
+  multiResult: MultiExecResult | null;
+  multiLoading: boolean;
+  multiError: string | null;
+  // 写操作二次确认（pending 时由 AiPanel 弹窗）
+  pendingWriteConfirm: WriteConfirmState | null;
   // 历史
   history: HistoryItem[];
   // 设置弹窗
@@ -49,6 +65,13 @@ interface AppState {
   setSql: (sql: string) => void;
   runQuery: (opts?: RunQueryOptions) => Promise<void>;
   generateAi: (prompt: string) => Promise<void>;
+  runMultiQuery: () => void;
+  runSingleQuery: (stmt: string) => void;
+  fillEditorWithStatements: (stmt?: string) => void;
+  confirmWriteConfirm: () => Promise<void>;
+  cancelWriteConfirm: () => void;
+  _executeMulti: () => Promise<void>;
+  _executeSingle: (stmt: string) => Promise<void>;
   loadHistory: () => Promise<void>;
   deleteHistoryItem: (id: string) => Promise<void>;
   clearHistory: () => Promise<void>;
@@ -58,6 +81,35 @@ interface AppState {
   testAiSettings: (
     input: AiSettingsInput
   ) => Promise<{ ok: boolean; message: string }>;
+}
+
+/** localStorage 键：写入后「本次不再提示」写操作确认（持久，跨会话）。 */
+export const WRITE_CONFIRM_SKIP_KEY = 'dbclient_skip_write_confirm';
+
+/** 判断语句是否为写操作（非 SELECT）。主理人决策 #1：所有非 SELECT 一律二次确认。 */
+export function isWriteStatement(sql: string): boolean {
+  return /^\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP|TRUNCATE|RENAME|GRANT|REVOKE|MERGE|SET)\b/i.test(
+    sql
+  );
+}
+
+/** 是否跳过写操作确认（localStorage 持久）。 */
+export function shouldSkipWriteConfirm(): boolean {
+  try {
+    return localStorage.getItem(WRITE_CONFIRM_SKIP_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** 设置/清除「跳过写操作确认」。 */
+export function setSkipWriteConfirm(skip: boolean): void {
+  try {
+    if (skip) localStorage.setItem(WRITE_CONFIRM_SKIP_KEY, '1');
+    else localStorage.removeItem(WRITE_CONFIRM_SKIP_KEY);
+  } catch {
+    // 忽略 localStorage 不可用时异常
+  }
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -70,9 +122,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   queryResult: null,
   queryLoading: false,
   queryError: null,
-  aiResult: null,
+  aiStatements: [],
+  aiHint: null,
   aiLoading: false,
   aiError: null,
+  multiResult: null,
+  multiLoading: false,
+  multiError: null,
+  pendingWriteConfirm: null,
   history: [],
   settingsOpen: false,
 
@@ -150,15 +207,120 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ aiError: '请输入需求描述' });
       return;
     }
-    set({ aiLoading: true, aiError: null });
+    set({ aiLoading: true, aiError: null, aiHint: null, multiResult: null, multiError: null });
     try {
       const current = get().currentConnection;
       const res = await api.generateSql(
         current ? { connectionId: current.id, prompt } : { prompt }
       );
-      set({ aiResult: res.sql, aiLoading: false });
+      // 主理人决策 #6：完全迁移 statements，删除 sql 字段
+      set({ aiStatements: res.statements, aiLoading: false });
+      if (res.statements.length === 0) {
+        // 纯解释无 SQL：友好提示（来自接口 message 的等价文案）
+        set({ aiHint: 'AI 未返回可执行的 SQL，请调整需求后重试' });
+      }
     } catch (err) {
       set({ aiLoading: false, aiError: (err as Error).message });
+    }
+  },
+
+  runMultiQuery() {
+    const { currentConnection, aiStatements } = get();
+    if (!currentConnection) {
+      set({ multiError: '请先选择一个数据库连接' });
+      return;
+    }
+    if (!aiStatements.length) {
+      set({ multiError: '暂无可执行的 AI 生成语句' });
+      return;
+    }
+    const writeStmts = aiStatements.filter((s) => isWriteStatement(s));
+    // 主理人决策 #1：有写语句且未选择「不再提示」→ 置 pending 让 AiPanel 弹确认
+    if (writeStmts.length > 0 && !shouldSkipWriteConfirm()) {
+      set({
+        pendingWriteConfirm: {
+          mode: 'multi',
+          writeCount: writeStmts.length,
+          connectionName: currentConnection.name,
+        },
+      });
+      return;
+    }
+    void get()._executeMulti();
+  },
+
+  runSingleQuery(stmt) {
+    const { currentConnection } = get();
+    if (!currentConnection) {
+      set({ queryError: '请先选择一个数据库连接' });
+      return;
+    }
+    // 单条为非 SELECT 且未选择「不再提示」→ 弹确认
+    if (isWriteStatement(stmt) && !shouldSkipWriteConfirm()) {
+      set({
+        pendingWriteConfirm: {
+          mode: 'single',
+          writeCount: 1,
+          connectionName: currentConnection.name,
+          stmt,
+        },
+      });
+      return;
+    }
+    void get()._executeSingle(stmt);
+  },
+
+  fillEditorWithStatements(stmt) {
+    const { aiStatements } = get();
+    // 单条回填该句，否则回填全部（join 后写入，绝不自动执行）
+    const text = stmt ?? aiStatements.join(';\n');
+    set({ sql: text });
+  },
+
+  async confirmWriteConfirm() {
+    const pending = get().pendingWriteConfirm;
+    set({ pendingWriteConfirm: null });
+    if (!pending) return;
+    if (pending.mode === 'single' && pending.stmt) {
+      await get()._executeSingle(pending.stmt);
+    } else {
+      await get()._executeMulti();
+    }
+  },
+
+  cancelWriteConfirm() {
+    set({ pendingWriteConfirm: null });
+  },
+
+  async _executeMulti() {
+    const { currentConnection, aiStatements } = get();
+    if (!currentConnection) return;
+    set({ multiLoading: true, multiError: null });
+    try {
+      const res = await api.executeMultiQuery({
+        connectionId: currentConnection.id,
+        sql: aiStatements.join(';\n'),
+      });
+      set({ multiResult: res, multiLoading: false });
+      void get().loadHistory();
+    } catch (err) {
+      set({ multiLoading: false, multiError: (err as Error).message });
+    }
+  },
+
+  async _executeSingle(stmt: string) {
+    const { currentConnection } = get();
+    if (!currentConnection) return;
+    set({ queryLoading: true, queryError: null });
+    try {
+      const result = await api.executeQuery({
+        connectionId: currentConnection.id,
+        sql: stmt,
+      });
+      set({ queryResult: result, queryLoading: false });
+      void get().loadHistory();
+    } catch (err) {
+      set({ queryLoading: false, queryError: (err as Error).message });
     }
   },
 

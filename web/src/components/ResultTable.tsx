@@ -16,15 +16,23 @@ import {
 import DownloadIcon from '@mui/icons-material/Download';
 import { useAppStore } from '../store/appStore';
 import { toCsv, downloadCsv } from '../utils/csv';
+import type { QueryResult } from '../types';
 
 /**
  * 查询结果表格（P0-2 / P1-2 / P1-5）：列排序、导出 CSV、行数与耗时展示。
+ * 传入 `result` 时作为独立结果展示（如多语句逐条结果），忽略全局 loading/error。
  */
-export default function ResultTable(): JSX.Element {
-  const result = useAppStore((s) => s.queryResult);
+export default function ResultTable({
+  result: propResult,
+}: {
+  result?: QueryResult;
+}): JSX.Element {
+  const storeResult = useAppStore((s) => s.queryResult);
   const loading = useAppStore((s) => s.queryLoading);
   const error = useAppStore((s) => s.queryError);
   const current = useAppStore((s) => s.currentConnection);
+
+  const result = propResult ?? storeResult;
 
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -57,6 +65,16 @@ export default function ResultTable(): JSX.Element {
     const name = `query_${current?.name ?? 'result'}_${Date.now()}.csv`;
     downloadCsv(csv, name);
   };
+
+  // 独立结果模式（多语句逐条）：仅依赖传入 result，忽略全局 loading/error
+  if (propResult) {
+    if (!result) {
+      return (
+        <Box className="p-4 text-gray-400 text-sm">该语句无返回结果。</Box>
+      );
+    }
+    return renderTable(result, sortedRows, sortCol, sortDir, handleSort, handleExport, current);
+  }
 
   if (!current) {
     return (
@@ -91,6 +109,19 @@ export default function ResultTable(): JSX.Element {
     );
   }
 
+  return renderTable(result, sortedRows, sortCol, sortDir, handleSort, handleExport, current);
+}
+
+/** 抽出表格渲染（全局模式与独立模式共用）。 */
+function renderTable(
+  result: QueryResult,
+  sortedRows: Record<string, unknown>[],
+  sortCol: string | null,
+  sortDir: 'asc' | 'desc',
+  handleSort: (col: string) => void,
+  handleExport: () => void,
+  current: { name?: string } | null
+): JSX.Element {
   return (
     <Box className="flex flex-col h-full">
       <Box className="flex items-center px-3 py-1.5 border-b border-gray-200 bg-white text-sm">
@@ -98,7 +129,12 @@ export default function ResultTable(): JSX.Element {
           共 {result.rowCount} 行 · 耗时 {result.elapsedMs} ms
         </Typography>
         {result.truncated && (
-          <Chip size="small" color="warning" label={`已截断（LIMIT ${result.appliedLimit}）`} className="ml-3" />
+          <Chip
+            size="small"
+            color="warning"
+            label={`已截断（LIMIT ${result.appliedLimit}）`}
+            className="ml-3"
+          />
         )}
         <Box className="flex-1" />
         <Tooltip title="导出 CSV（P1-2）">

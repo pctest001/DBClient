@@ -9,19 +9,74 @@ import { getSettings, decryptApiKey } from './settingsService.js';
 import { getDdlContext } from './schemaService.js';
 import { AppError } from '../utils/response.js';
 import type { ConnectionRecord, AiGenerateRes } from '../models/types.js';
+import { splitStatements } from '../utils/sqlSplit.js';
 
 const AI_TIMEOUT_MS = 30000;
 
 const SYSTEM_PROMPT = `你是资深 SQL 工程师。下面是被查询数据库的表结构（DDL，仅含表名/列名/类型/注释，不含任何数据行）。
-请根据用户需求生成【一条】可执行的 SQL。只输出 SQL 本身，不要解释，不要使用 markdown 代码块围栏。`;
+请根据用户需求生成可执行的 SQL；可以生成【多条】，以英文分号 ; 分隔。
+SQL 之内可以包含 -- 行注释，但不要在 SQL 之外写解释性文字，不要使用 markdown 代码块围栏。`;
 
-/** 剥离模型返回中的 ```sql ... ``` 围栏与语言标识。 */
-function stripFences(text: string): string {
-  let s = (text ?? '').trim();
-  const fenced = /^```(?:sql)?\s*([\s\S]*?)\s*```$/i.exec(s);
-  if (fenced) s = fenced[1].trim();
-  s = s.replace(/^```(?:sql)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  return s;
+/**
+ * 已知 SQL 起始关键字白名单（大小写不敏感）。
+ * 用于甄别「模型返回的纯自然语言解释」与「真正的 SQL 语句」，
+ * 满足主理人决策 #5：纯解释无 SQL 时返回 statements:[]，不走 50003。
+ */
+const SQL_KEYWORDS = new Set<string>([
+  'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP',
+  'TRUNCATE', 'WITH', 'REPLACE', 'MERGE', 'GRANT', 'REVOKE', 'EXPLAIN',
+  'SHOW', 'USE', 'SET', 'CALL', 'BEGIN', 'COMMIT', 'ROLLBACK', 'PRAGMA',
+  'VALUES', 'ANALYZE', 'DESCRIBE',
+]);
+
+/**
+ * 去掉首尾空白及 SQL 注释（`--` 行注释、`/* *\/` 块注释），返回可读 token 串。
+ * 用于关键字甄别与最终输出清洗（剥离装饰性注释，保留可执行 SQL）。
+ */
+function stripComments(s: string): string {
+  return s
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/--[^\n]*/g, ' ')
+    .trim();
+}
+
+/**
+ * 取首个有意义 token（按空白 / 括号分词）。
+ * 例：`(select 1)` → `select`；`select 1` → `select`；`这是说明\nselect 2` → `这是说明`。
+ */
+function firstToken(s: string): string {
+  const m = s.match(/[^\s()]+/);
+  return m ? m[0] : '';
+}
+
+/**
+ * 判断片段是否为真正的 SQL 语句：剥离注释后，首个 token（大小写不敏感）命中白名单。
+ */
+function isSqlStatement(s: string): boolean {
+  const cleaned = stripComments(s);
+  if (!cleaned) return false;
+  return SQL_KEYWORDS.has(firstToken(cleaned).toUpperCase());
+}
+
+/**
+ * 从拆分后的语句列表中剔除「纯自然语言解释」片段，保留真正的 SQL。
+ *
+ * - 首 token 命中关键字 → 视为真实 SQL，整条保留（保留多行写法），仅清洗注释。
+ * - 首 token 非关键字 → 可能为纯解释，或解释与 SQL 混排；逐行再萃取首 token
+ *   命中关键字的 SQL 行（解释行被忽略），避免误删合法 SQL。
+ */
+function filterSqlStatements(rawStmts: string[]): string[] {
+  const out: string[] = [];
+  for (const s of rawStmts) {
+    if (isSqlStatement(s)) {
+      out.push(stripComments(s));
+    } else {
+      for (const line of s.split('\n')) {
+        if (isSqlStatement(line)) out.push(stripComments(line));
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -101,9 +156,9 @@ export async function generate(
     clearTimeout(timer);
   }
 
-  const sql = stripFences(raw);
-  if (!sql) {
-    throw new AppError(50003, 'AI 未返回有效 SQL，请调整需求后重试。');
-  }
-  return { sql, model: settings.model };
+  // 主理人决策 #5：纯解释无 SQL → 返回 statements:[]，不抛 50003（友好提示由路由经 message 返回）
+  // 过滤掉模型返回的「纯自然语言解释」片段：真实 SQL 首 token 必为白名单关键字之一，
+  // 纯解释会被剔除；若 raw 非空但最终 statements 为空，仍返回 []（路由层给友好 message），此处不抛错。
+  const statements = filterSqlStatements(splitStatements(raw));
+  return { statements, model: settings.model };
 }

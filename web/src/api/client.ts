@@ -11,6 +11,8 @@ import type {
   QueryResult,
   AiGenerateReq,
   AiGenerateRes,
+  MultiExecReq,
+  MultiExecResult,
   AiSettingsInput,
   AiSettingsPublic,
   HistoryItem,
@@ -129,6 +131,10 @@ export const api = {
   // ===== 查询执行（P0-2 / P1-5） =====
   executeQuery: (req: QueryExecReq) =>
     request<QueryResult>('/query/execute', jsonBody(req)),
+
+  // ===== 多语句执行（增量迭代） =====
+  executeMultiQuery: (req: MultiExecReq) =>
+    request<MultiExecResult>('/query/execute-multi', jsonBody(req)),
 
   // ===== AI 生成 SQL（P0-3 / P0-5） =====
   generateSql: (req: AiGenerateReq) =>

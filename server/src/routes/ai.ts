@@ -23,7 +23,12 @@ router.post('/generate', asyncHandler(async (req, res) => {
     ? connectionService.getRecordById(body.connectionId)
     : null;
   const result = await generate(connRecord, body.prompt);
-  ok(res, result);
+  // 主理人决策 #5：纯解释无 SQL → 返回 code:0 + 友好 message（不走 50003）
+  if (result.statements.length === 0) {
+    ok(res, result, 'AI 未返回可执行的 SQL，请调整需求后重试');
+  } else {
+    ok(res, result);
+  }
 }));
 
 export default router;

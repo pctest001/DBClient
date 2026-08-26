@@ -16,7 +16,10 @@ import type {
   ConnectionRecord,
   ConnectionTestRes,
   QueryResult,
+  MultiExecResult,
+  MultiExecStatement,
 } from '../models/types.js';
+import { splitStatements } from '../utils/sqlSplit.js';
 
 const { Client } = pg;
 const DEFAULT_LIMIT = 1000;
@@ -207,4 +210,37 @@ export async function execute(
   } catch (err) {
     throw new AppError(50002, `SQL 执行失败: ${(err as Error).message}`);
   }
+}
+
+/**
+ * 多语句执行（增量迭代）：将整段 SQL 拆分为多条，逐条独立执行（复用 execute）。
+ *
+ * - 每条语句独立 try/catch，单条失败（含 50002 SQL 错误）不阻断其余语句；
+ *   失败信息写入该条 `error`（仅业务信息，无凭据/密文）。
+ * - 每条 SELECT 各自经 `execute` 内的 `shouldApplyLimit` 独立追加 `LIMIT 1000`。
+ * - 顶层调用方据此聚合，整体返回 `MultiExecResult`（error 隔离在 statements 内，
+ *   仅连接不存在 40401 等由 errorHandler 上升为外层错误）。
+ */
+export async function executeMulti(
+  conn: ConnectionRecord,
+  sql: string,
+  opts: ExecuteOptions = {}
+): Promise<MultiExecResult> {
+  const statements = splitStatements(sql);
+  const results: MultiExecStatement[] = [];
+  for (let idx = 0; idx < statements.length; idx++) {
+    const s = statements[idx].trim();
+    if (!s) continue;
+    try {
+      const result = await execute(conn, s, opts);
+      results.push({ sql: s, result });
+    } catch (err) {
+      results.push({ sql: s, error: (err as Error).message });
+    }
+  }
+  return {
+    statements: results,
+    successCount: results.filter((r) => !r.error).length,
+    errorCount: results.filter((r) => !!r.error).length,
+  };
 }

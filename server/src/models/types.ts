@@ -101,8 +101,31 @@ export interface AiGenerateReq {
 }
 
 export interface AiGenerateRes {
-  sql: string; // 仅 SQL，已去除 markdown 围栏
+  statements: string[]; // 清洗拆分后的多条 SQL（已去围栏/解释/空段）
   model: string;
+}
+
+/** 多语句执行请求（与 QueryExecReq 同形）。 */
+export interface MultiExecReq {
+  connectionId: string;
+  sql: string;
+  limit?: boolean;
+  limitValue?: number;
+  unlimited?: boolean;
+}
+
+/** 多语句执行——单条结果（成功含 result，失败含 error）。 */
+export interface MultiExecStatement {
+  sql: string;
+  result?: QueryResult;
+  error?: string;
+}
+
+/** 多语句执行——聚合结果（错误已隔离在 statements[].error，顶层整体成功）。 */
+export interface MultiExecResult {
+  statements: MultiExecStatement[];
+  successCount: number;
+  errorCount: number;
 }
 
 export interface HistoryItem {

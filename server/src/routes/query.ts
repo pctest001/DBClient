@@ -9,7 +9,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { validate, ok, asyncHandler } from '../utils/response.js';
 import { connectionService } from '../services/connectionService.js';
-import { execute } from '../services/dbService.js';
+import { execute, executeMulti } from '../services/dbService.js';
 import { historyService } from '../services/historyService.js';
 
 const router = Router();
@@ -59,6 +59,41 @@ router.post('/execute', asyncHandler(async (req, res) => {
     });
     throw err; // 交由 errorHandler 以原错误码返回（如 50002）
   }
+}));
+
+const multiSchema = z.object({
+  connectionId: z.string().min(1, 'connectionId 必填'),
+  sql: z.string().min(1, 'SQL 不能为空'),
+  limit: z.boolean().default(true),
+  limitValue: z.number().int().positive().optional(),
+  unlimited: z.boolean().optional(),
+});
+
+router.post('/execute-multi', asyncHandler(async (req, res) => {
+  const body = validate(multiSchema, req.body);
+  const connRecord = connectionService.getRecordById(body.connectionId); // 缺失抛 40401
+  const start = Date.now();
+  const result = await executeMulti(connRecord, body.sql, {
+    limit: body.limit,
+    limitValue: body.limitValue,
+    unlimited: body.unlimited,
+  });
+  // 记一条聚合历史（sql 为原始整段；有任一失败即记 error）
+  historyService.add({
+    connectionId: connRecord.id,
+    connectionName: connRecord.name,
+    sql: body.sql,
+    status: result.errorCount > 0 ? 'error' : 'success',
+    rowCount: null,
+    elapsedMs: Date.now() - start,
+    error:
+      result.errorCount > 0
+        ? `多语句执行：成功 ${result.successCount} / 失败 ${result.errorCount}`
+        : null,
+    executedAt: new Date().toISOString(),
+  });
+  // 顶层 code:0；语句级错误已隔离在 result.statements[].error 内（仅 40401 等外层错误上升）
+  ok(res, result);
 }));
 
 export default router;
