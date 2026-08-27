@@ -1,6 +1,6 @@
 # DBClient MVP — 需求完成度清单（Backlog & Status）
 
-> 维护人：主理人（齐活林）｜ 更新：2026-08-26
+> 维护人：主理人（齐活林）｜ 更新：2026-08-27
 > 数据来源：`docs/prd.md`（MVP 原始 PRD）、`docs/architecture.md`（架构 v0.1）、`docs/prd-ai-clean-multistmt.md`（增量迭代 PRD）、`docs/prd-conn-io.md`（P2-5 PRD）、实际代码核对。
 > 最新提交：见 `git log`（P2-5 之后含「连接配置导入/导出」）。
 
@@ -12,10 +12,10 @@
 | --- | --- |
 | MVP P0（上线门槛） | ✅ 全部完成 |
 | MVP P1（重要增强） | ✅ 全部完成 |
-| MVP P2（可选） | 🟡 部分完成（3/5，剩 2 项） |
+| MVP P2（可选） | 🟡 部分完成（剩 1 项：暗色主题） |
 | 增量迭代 P0（AI 清洗+多语句） | ✅ 全部完成 |
 | 增量迭代 P1（4 项） | ✅ 全部完成 |
-| 增量迭代 P2（4 项） | ⬜ 全部未做 |
+| 增量迭代 P2（4 项） | 🟡 部分完成（1/4，事务选项已做） |
 | 架构「待明确」技术债 | 🟡 3 项待补 |
 
 ---
@@ -57,15 +57,14 @@
 
 ## 2. ⬜ 未做（待补）
 
-### 2.1 增量迭代 P2（4 项全未做）
+### 2.1 增量迭代 P2（剩 3 项未做）
 | 项 | 说明 | 价值 |
 | --- | --- | --- |
 | **P2-1** 多语句结果多标签展示 | 每条结果独立 Tab/分页（当前为逐条折叠卡片） | 体验 |
-| **P2-2** `execute-multi` 事务选项 | 新增 `transaction=true`，同一连接 `BEGIN/COMMIT` 全成功或全回滚（当前各自独立） | **数据安全，高价值** |
 | **P2-3** AI 结果一键格式化/美化 | 基于编辑器格式化能力扩展到多语句 | 体验 |
 | **P2-4** 多语句历史聚合+重载 | 历史记整段 SQL+成功/失败计数，点击重载回编辑器（目前重载主要服务单条） | 体验 |
 
-### 2.2 MVP P2（剩 2 项未做）
+### 2.2 MVP P2（剩 1 项未做）
 | 项 | 说明 | 价值 |
 | --- | --- | --- |
 | **P2-4** 暗色主题切换 | 代码无 darkMode/theme 切换 | 体验 |
@@ -87,8 +86,7 @@
 | --- | --- | --- |
 | 1 | **P2-4 暗色主题** | 体验项，工作量中等 |
 | 2 | **C.3 生产同源部署** | 要上线才需要 |
-| 3 | **增量 P2-2 事务选项** | 对数据安全最有价值，其余偏体验 |
-| 4 | 其余 P2 / 技术债 | 按实际需要排期 |
+| 3 | 其余 P2 / 技术债 | 按实际需要排期 |
 
 ---
 
@@ -101,6 +99,16 @@
 - **顺手修复（存量缺陷）**：`api-contract.test.js` 原先 spawn 后端 `cwd: serverRoot` 直读真实 `server/data/`，在用户实际使用（数据非空）时必然失败；已改为系统临时目录隔离（绝对路径启动 + mkdtemp cwd + 用后清理），46/46 全绿。
 - **测试约定提示**：crypto 套件需 shell 注入 `DB_CLIENT_MASTER_KEY`；全量回归命令：
   `cd server && mkdir -p .tmp-test && cd .tmp-test && DB_CLIENT_MASTER_KEY=<key> node --experimental-test-module-mocks --test ../tests/*.test.js`
+
+---
+
+## 5. 已完成（本轮）：增量 P2-2 事务选项
+
+> 执行说明：本轮走正式团队 SOP（team `software-dbclient-txn`，快速模式）：工程师寇豆码实现 + QA 严过关独立验证（判定 PASS、路由 NoOne），主理人提交推送。
+
+- **交付内容**：`MultiExecReq.transaction?` / `MultiExecResult.rolledBack?`（前后端类型对齐）；`dbService` 新增 `openTransaction()`（单连接全程复用：mysql `beginTransaction`、pg `BEGIN`）+ `executeMultiInTransaction()`（任一失败立即回滚并停止后续、`finalized` 防 commit 后误回滚、finally 保证关连接）；路由 `multiSchema` 加 zod 校验并透传、历史记录回滚时追加「已回滚 N 条」提示；前端 AiPanel 事务开关（带 Tooltip）+ 回滚警示 Alert、`multiTransaction` 状态跨写确认弹窗固化（以发起时为准）。
+- **向后兼容**：不带 `transaction`（或显式 false）走原「错误隔离」路径，行为一字未改。
+- **验证结果**：server `tsc` 零错误；全量回归 **51/51** 通过（multiExec 9 用例含 5 个新事务用例：pg/mysql 双库 × 全成功/中途失败 + 默认回归 + 连接关闭）；web 构建通过。QA 补充 10 项边界验证（空语句、事务+limitValue、commit 失败、rollback 自身抛错等）全部通过。
 
 ---
 

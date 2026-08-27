@@ -14,6 +14,8 @@ import {
   AccordionSummary,
   AccordionDetails,
   Chip,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import BackspaceIcon from '@mui/icons-material/Backspace';
@@ -46,6 +48,8 @@ export default function AiPanel(): JSX.Element {
 
   const [prompt, setPrompt] = useState('');
   const [dontAskAgain, setDontAskAgain] = useState(false);
+  // 事务执行开关（增量 P2-2）：开启后整批在同一连接上以事务执行，任一语句失败全部回滚
+  const [txMode, setTxMode] = useState(false);
 
   const handleSend = () => {
     if (!prompt.trim()) return;
@@ -180,11 +184,27 @@ export default function AiPanel(): JSX.Element {
               ))}
             </Stack>
 
+            {/* 事务执行开关：任一语句失败时全部回滚，适合同一批写操作 */}
+            <Stack direction="row" alignItems="center" className="mb-1.5">
+              <Tooltip title="任一语句失败时全部回滚，适合同一批写操作">
+                <FormControlLabel
+                  control={
+                    <Switch
+                      size="small"
+                      checked={txMode}
+                      onChange={(e) => setTxMode(e.target.checked)}
+                    />
+                  }
+                  label={<Typography variant="body2">事务执行</Typography>}
+                />
+              </Tooltip>
+            </Stack>
+
             <Button
               variant="contained"
               color="primary"
               fullWidth
-              onClick={runMultiQuery}
+              onClick={() => runMultiQuery(txMode)}
               disabled={multiLoading}
               startIcon={multiLoading ? <CircularProgress size={16} color="inherit" /> : undefined}
             >
@@ -199,6 +219,11 @@ export default function AiPanel(): JSX.Element {
             )}
             {multiResult && (
               <Box className="mt-3">
+                {multiResult.rolledBack === true && (
+                  <Alert severity="warning" className="mb-2">
+                    事务已回滚，本次执行的所有变更未生效。
+                  </Alert>
+                )}
                 <Alert
                   severity={multiResult.errorCount > 0 ? 'warning' : 'success'}
                   variant="outlined"

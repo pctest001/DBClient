@@ -67,6 +67,7 @@ const multiSchema = z.object({
   limit: z.boolean().default(true),
   limitValue: z.number().int().positive().optional(),
   unlimited: z.boolean().optional(),
+  transaction: z.boolean().optional(), // 事务模式（增量 P2-2）：默认 false（错误隔离）
 });
 
 router.post('/execute-multi', asyncHandler(async (req, res) => {
@@ -77,8 +78,10 @@ router.post('/execute-multi', asyncHandler(async (req, res) => {
     limit: body.limit,
     limitValue: body.limitValue,
     unlimited: body.unlimited,
+    transaction: body.transaction, // 事务模式：单连接 + BEGIN/COMMIT/ROLLBACK
   });
-  // 记一条聚合历史（sql 为原始整段；有任一失败即记 error）
+  // 记一条聚合历史（sql 为原始整段；有任一失败即记 error）；
+  // 事务回滚时追加明确提示，让用户在历史里看得出该批次变更未生效
   historyService.add({
     connectionId: connRecord.id,
     connectionName: connRecord.name,
@@ -88,7 +91,11 @@ router.post('/execute-multi', asyncHandler(async (req, res) => {
     elapsedMs: Date.now() - start,
     error:
       result.errorCount > 0
-        ? `多语句执行：成功 ${result.successCount} / 失败 ${result.errorCount}`
+        ? `多语句执行：成功 ${result.successCount} / 失败 ${result.errorCount}${
+            result.rolledBack
+              ? `（事务已回滚 ${result.successCount} 条，本次执行的所有变更未生效）`
+              : ''
+          }`
         : null,
     executedAt: new Date().toISOString(),
   });

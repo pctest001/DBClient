@@ -160,6 +160,7 @@ export interface MultiExecReq {
   limit?: boolean;
   limitValue?: number;
   unlimited?: boolean;
+  transaction?: boolean; // 事务模式（增量 P2-2）：true 时整批在单一连接上以事务执行，任一失败全量回滚；默认 false
 }
 
 /** 多语句执行——单条结果（成功含 result，失败含 error）。 */
@@ -174,6 +175,7 @@ export interface MultiExecResult {
   statements: MultiExecStatement[];
   successCount: number;
   errorCount: number;
+  rolledBack?: boolean; // 事务模式下发生回滚时为 true；非事务模式不出现该字段
 }
 
 export interface HistoryItem {

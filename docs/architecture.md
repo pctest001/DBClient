@@ -295,6 +295,7 @@ export interface MultiExecReq {
   limit?: boolean;          // 默认 true（每条 SELECT 各自追加 LIMIT 1000）
   limitValue?: number;
   unlimited?: boolean;
+  transaction?: boolean;    // 增量 P2-2：true 时事务模式（默认 false 走错误隔离模式）
 }
 export interface MultiExecStatement {
   sql: string;
@@ -305,6 +306,7 @@ export interface MultiExecResult {
   statements: MultiExecStatement[];
   successCount: number;
   errorCount: number;
+  rolledBack?: boolean;     // 增量 P2-2：事务模式回滚时为 true；错误隔离模式不出现该字段
 }
 export interface HistoryItem {
   id: string;
@@ -532,7 +534,7 @@ graph TD
 2. **AI 生成 SQL 的语句类型范围**：MVP 允许 AI 生成 SELECT 之外的语句（如带条件的 UPDATE 片段），但**一律仅建议、不自动执行**（P0-5）。是否在 UI 上对写操作额外二次确认弹窗，建议 T04 实现时加轻量确认，非阻塞。
 3. **history.json 容量**：建议上限 200 条环形覆盖，未强制；T05 实现时可由 `historyService` 维护。
 4. **前端部署形态**：生产环境是否由 Express 静态托管 `web/dist` 同源部署（单一端口）待定；MVP dev 用 Vite proxy 已满足，同源部署在 `app.ts` 预留静态目录挂载点即可。
-5. **多语句执行**：已支持（新增 `POST /api/query/execute-multi`，服务端 `splitStatements` 按 `;` 拆多条、逐条独立执行、错误隔离、每条 SELECT 各自追加 LIMIT；前端 AI 面板逐条展示并支持单条/全部执行）。多语句分标签展示（P2-1）仍可选。
+5. **多语句执行**：已支持（新增 `POST /api/query/execute-multi`，服务端 `splitStatements` 按 `;` 拆多条、逐条独立执行、错误隔离、每条 SELECT 各自追加 LIMIT；前端 AI 面板逐条展示并支持单条/全部执行）。**增量 P2-2 事务模式已支持**：`MultiExecReq.transaction: true` 时走单连接事务路径（mysql `beginTransaction/commit/rollback`、pg `BEGIN/COMMIT/ROLLBACK`），任一语句失败立即回滚并停止后续，响应带 `rolledBack: true`，前端 AI 面板有事务开关与回滚警示。多语句分标签展示（P2-1）仍可选。
 
 ---
 

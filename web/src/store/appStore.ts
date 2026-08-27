@@ -51,6 +51,8 @@ interface AppState {
   multiResult: MultiExecResult | null;
   multiLoading: boolean;
   multiError: string | null;
+  // 多语句执行——事务模式开关（增量 P2-2：任一语句失败全部回滚）
+  multiTransaction: boolean;
   // 写操作二次确认（pending 时由 AiPanel 弹窗）
   pendingWriteConfirm: WriteConfirmState | null;
   // 历史
@@ -65,7 +67,7 @@ interface AppState {
   setSql: (sql: string) => void;
   runQuery: (opts?: RunQueryOptions) => Promise<void>;
   generateAi: (prompt: string) => Promise<void>;
-  runMultiQuery: () => void;
+  runMultiQuery: (transaction?: boolean) => void;
   runSingleQuery: (stmt: string) => void;
   fillEditorWithStatements: (stmt?: string) => void;
   confirmWriteConfirm: () => Promise<void>;
@@ -129,6 +131,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   multiResult: null,
   multiLoading: false,
   multiError: null,
+  multiTransaction: false,
   pendingWriteConfirm: null,
   history: [],
   settingsOpen: false,
@@ -224,7 +227,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  runMultiQuery() {
+  runMultiQuery(transaction = false) {
     const { currentConnection, aiStatements } = get();
     if (!currentConnection) {
       set({ multiError: '请先选择一个数据库连接' });
@@ -234,6 +237,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ multiError: '暂无可执行的 AI 生成语句' });
       return;
     }
+    // 记住本次执行的事务模式（写确认弹窗确认后由 _executeMulti 读取使用）
+    set({ multiTransaction: transaction });
     const writeStmts = aiStatements.filter((s) => isWriteStatement(s));
     // 主理人决策 #1：有写语句且未选择「不再提示」→ 置 pending 让 AiPanel 弹确认
     if (writeStmts.length > 0 && !shouldSkipWriteConfirm()) {
@@ -293,13 +298,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async _executeMulti() {
-    const { currentConnection, aiStatements } = get();
+    const { currentConnection, aiStatements, multiTransaction } = get();
     if (!currentConnection) return;
     set({ multiLoading: true, multiError: null });
     try {
       const res = await api.executeMultiQuery({
         connectionId: currentConnection.id,
         sql: aiStatements.join(';\n'),
+        // 事务模式（增量 P2-2）：透传到后端，任一语句失败整批回滚
+        transaction: multiTransaction,
       });
       set({ multiResult: res, multiLoading: false });
       void get().loadHistory();
